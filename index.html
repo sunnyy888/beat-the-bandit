@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beat the Bandit</title>
+<meta name="description" content="Three slot machines, hidden payout rates, 100 pulls. Can you out-earn Thompson sampling and epsilon-greedy?">
+<style>
+:root{
+  --bg:#f6f4ef; --panel:#ffffff; --ink:#1d1f24; --muted:#6b6f78; --line:#e3dfd6;
+  --you:#e0603a; --ts:#2f6fdb; --eg:#2e9b62; --gold:#d9a514; --bad:#c2413b;
+  --m0:#8a5cf6; --m1:#e0603a; --m2:#1f9fb5; --shadow:0 2px 10px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#14161a; --panel:#1d2026; --ink:#eceef2; --muted:#9aa0aa; --line:#2c3038;
+  --shadow:0 2px 12px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{ --bg:#14161a; --panel:#1d2026; --ink:#eceef2; --muted:#9aa0aa; --line:#2c3038; --shadow:0 2px 12px rgba(0,0,0,.4); }
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 16px;justify-content:space-between}
+h1{font-size:26px;margin:4px 0}
+.sub{color:var(--muted);margin:0 0 10px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;padding:7px 11px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;box-shadow:var(--shadow)}
+.machines{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0}
+.machine{position:relative;text-align:center;padding:14px 10px 12px;border-radius:14px;border:2px solid var(--line);background:var(--panel);cursor:pointer;user-select:none;transition:transform .08s}
+.machine:active{transform:scale(.98)}
+.machine[disabled]{cursor:default;opacity:.7}
+.machine .name{font-weight:700;letter-spacing:.04em}
+.window{margin:10px auto;width:86px;height:86px;border-radius:12px;display:grid;place-items:center;font-size:44px;font-weight:800;color:#fff;overflow:hidden;position:relative}
+.window .sym{transition:transform .25s}
+.spin .sym{animation:spin .35s ease-out}
+@keyframes spin{0%{transform:translateY(-120%)}60%{transform:translateY(12%)}100%{transform:translateY(0)}}
+.win .window{box-shadow:0 0 0 4px var(--gold),0 0 22px var(--gold)}
+.lose .window{filter:saturate(.35)}
+.stats{font-size:13px;color:var(--muted)}
+.key{position:absolute;top:8px;right:10px;font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.true{font-size:13px;margin-top:4px;font-weight:700;min-height:18px}
+.coin{position:absolute;left:50%;top:40%;font-size:26px;pointer-events:none;animation:coin .7s ease-out forwards}
+@keyframes coin{from{transform:translate(-50%,0);opacity:1}to{transform:translate(-50%,-70px);opacity:0}}
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.player{border-left:5px solid var(--c);padding:10px 12px}
+.player h3{margin:0 0 4px;font-size:15px;display:flex;justify-content:space-between}
+.score{font-size:30px;font-weight:800;font-variant-numeric:tabular-nums}
+.bars{display:flex;gap:4px;align-items:flex-end;height:46px;margin-top:6px}
+.bars div{flex:1;border-radius:4px 4px 0 0;min-height:2px;position:relative;transition:height .2s}
+.bars span{position:absolute;bottom:-17px;left:0;right:0;text-align:center;font-size:11px;color:var(--muted)}
+.lead{color:var(--gold);font-size:12px;font-weight:700}
+.progress{height:6px;background:var(--line);border-radius:4px;overflow:hidden;margin:12px 0 4px}
+.progress div{height:100%;background:var(--you);width:0;transition:width .2s}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+canvas{width:100%;height:220px;display:block}
+.legend{display:flex;gap:14px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.muted{color:var(--muted)}
+dialog{border:0;border-radius:14px;padding:0;max-width:560px;width:calc(100% - 32px);background:var(--panel);color:var(--ink);box-shadow:0 10px 40px rgba(0,0,0,.35)}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+.modal{padding:20px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:14px}
+th,td{padding:6px 4px;border-bottom:1px solid var(--line);text-align:right}
+th:first-child,td:first-child{text-align:left}
+.badge{display:inline-block;background:var(--gold);color:#1d1f24;font-weight:800;border-radius:6px;padding:1px 8px;font-size:12px}
+.explain{font-size:14px}
+.explain p{margin:6px 0}
+.hidden{display:none}
+@media (max-width:640px){
+  .machines{gap:8px}.window{width:64px;height:64px;font-size:32px}
+  .board{grid-template-columns:1fr}.score{font-size:24px}
+  h1{font-size:22px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>🎰 Beat the Bandit</h1>
+      <p class="sub">Three machines, hidden payout rates, 100 pulls. Two algorithms play the same machines. Can you out-earn them?</p>
+    </div>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="Difficulty" id="diff">
+        <button data-d="easy">Easy</button><button data-d="medium">Medium</button><button data-d="hard">Hard</button>
+      </div>
+      <button id="newGame" class="primary">New game</button>
+      <button id="mute" aria-label="Toggle sound">🔊</button>
+    </div>
+  </header>
+
+  <div class="progress" aria-hidden="true"><div id="prog"></div></div>
+  <div class="row muted"><span id="pullsLeft">100 pulls left</span><span id="hs">Best (easy): –</span></div>
+
+  <div class="machines" id="machines"></div>
+
+  <div class="board">
+    <div class="panel player" style="--c:var(--you)"><h3>You <span class="lead" id="lead0"></span></h3><div class="score" id="s0">0</div><div class="stats" id="r0">coins</div><div class="bars" id="b0"></div></div>
+    <div class="panel player" style="--c:var(--ts)"><h3>Thompson sampling <span class="lead" id="lead1"></span></h3><div class="score" id="s1">0</div><div class="stats" id="r1">coins</div><div class="bars" id="b1"></div></div>
+    <div class="panel player" style="--c:var(--eg)"><h3>ε-greedy (ε = 0.1) <span class="lead" id="lead2"></span></h3><div class="score" id="s2">0</div><div class="stats" id="r2">coins</div><div class="bars" id="b2"></div></div>
+  </div>
+
+  <div class="panel" style="margin-top:14px">
+    <div class="row">
+      <strong>What Thompson believes</strong>
+      <label><input type="checkbox" id="showBeta"> Show Thompson's Beta curves live</label>
+    </div>
+    <div id="betaBox" class="hidden">
+      <canvas id="beta" width="900" height="220" aria-label="Beta posterior curves"></canvas>
+      <div class="legend" id="betaLegend"></div>
+      <p class="muted" style="font-size:13px;margin:6px 0 0">Each curve is Beta(1 + wins, 1 + losses) for one machine. Each pull, Thompson draws one random number from every curve and pulls the machine with the highest draw. Wide curves = still uncertain, so they sometimes win the draw (exploration). Narrow, high curves win most draws (exploitation).</p>
+    </div>
+  </div>
+
+  <div class="panel explain" style="margin-top:14px">
+    <strong>How to play</strong>
+    <p>Click a machine (or press <b>1</b>, <b>2</b>, <b>3</b>) to pull it. Each pull pays 1 coin with that machine's hidden probability. Every time you pull, both algorithms make one pull too, on the same three machines with their own luck.</p>
+    <p><b>Regret</b> = coins you'd expect from always pulling the best machine, minus the coins your choices are expected to earn: Σ (best rate − rate of machine pulled). Lower is better, and unlike coins it doesn't depend on luck.</p>
+    <p class="muted">Easy: rates far apart. Hard: within a few points of each other, so you need many pulls to tell them apart.</p>
+  </div>
+</div>
+
+<dialog id="end"><div class="modal">
+  <h2 style="margin:0 0 4px" id="endTitle">Game over</h2>
+  <p class="muted" id="endSub" style="margin:0 0 12px"></p>
+  <table id="endTable"></table>
+  <p class="explain" id="endNote"></p>
+  <div class="row"><span class="muted" style="font-size:13px">Score = coins. High score kept per difficulty on this device.</span><button class="primary" id="again">Play again</button></div>
+</div></dialog>
+
+<script id="core">
+/* ---------- core: pure logic, no DOM (tested by test.mjs) ---------- */
+const Core = (() => {
+  function mulberry32(seed) {               // small seeded RNG -> [0, 1)
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function normal(rng) {                    // Box-Muller
+    let u = 0; while (u === 0) u = rng();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rng());
+  }
+  function gamma(rng, k) {                  // Marsaglia-Tsang, k > 0
+    if (k < 1) return gamma(rng, k + 1) * Math.pow(rng() || 1e-12, 1 / k);
+    const d = k - 1 / 3, c = 1 / Math.sqrt(9 * d);
+    for (;;) {
+      let x, v;
+      do { x = normal(rng); v = 1 + c * x; } while (v <= 0);
+      v = v * v * v;
+      const u = rng();
+      if (u < 1 - 0.0331 * x ** 4 || Math.log(u) < 0.5 * x * x + d * (1 - v + Math.log(v))) return d * v;
+    }
+  }
+  function beta(rng, a, b) { const x = gamma(rng, a), y = gamma(rng, b); return x / (x + y); }
+  function lgamma(z) {                      // Lanczos approximation
+    const g = 7, c = [0.99999999999980993, 676.5203681218851, -1259.1392167224028, 771.32342877765313,
+      -176.61502916214059, 12.507343278686905, -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7];
+    if (z < 0.5) return Math.log(Math.PI / Math.sin(Math.PI * z)) - lgamma(1 - z);
+    z -= 1; let x = c[0];
+    for (let i = 1; i < g + 2; i++) x += c[i] / (z + i);
+    const t = z + g + 0.5;
+    return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
+  }
+  function betaPdf(x, a, b) {
+    if (x <= 0 || x >= 1) return 0;
+    return Math.exp((a - 1) * Math.log(x) + (b - 1) * Math.log(1 - x) + lgamma(a + b) - lgamma(a) - lgamma(b));
+  }
+  // difficulty -> payout rates. easy: best beats others by >= 0.20; hard: all within 0.06
+  const DIFFICULTY = {
+    easy:   { lo: 0.10, hi: 0.80, minGap: 0.20, maxSpread: 1 },
+    medium: { lo: 0.20, hi: 0.70, minGap: 0.08, maxSpread: 0.20 },
+    hard:   { lo: 0.30, hi: 0.60, minGap: 0.02, maxSpread: 0.06 },
+  };
+  function makeRates(rng, level) {
+    const d = DIFFICULTY[level];
+    for (let tries = 0; tries < 10000; tries++) {
+      const r = [0, 1, 2].map(() => Math.round((d.lo + rng() * (d.hi - d.lo)) * 100) / 100);
+      const s = [...r].sort((x, y) => y - x);
+      if (s[0] - s[1] >= d.minGap && s[0] - s[2] <= d.maxSpread) return r;
+    }
+    throw new Error("could not draw rates");
+  }
+  function argmaxRandom(xs, rng) {
+    const m = Math.max(...xs); const idx = xs.map((x, i) => (x === m ? i : -1)).filter(i => i >= 0);
+    return idx[Math.floor(rng() * idx.length)];
+  }
+  function newPlayer() { return { pulls: [0, 0, 0], wins: [0, 0, 0], coins: 0, history: [] }; }
+  // strategies return the arm to pull next
+  function thompsonChoose(p, rng) { return argmaxRandom([0, 1, 2].map(i => beta(rng, 1 + p.wins[i], 1 + p.pulls[i] - p.wins[i])), rng); }
+  function epsGreedyChoose(p, rng, eps = 0.1) {
+    const untried = [0, 1, 2].filter(i => p.pulls[i] === 0);
+    if (untried.length) return untried[0];              // pull each machine once first
+    if (rng() < eps) return Math.floor(rng() * 3);      // explore: any of the 3, leader included
+    return argmaxRandom([0, 1, 2].map(i => p.wins[i] / p.pulls[i]), rng);
+  }
+  function pull(p, arm, rates, rng) {
+    const win = rng() < rates[arm] ? 1 : 0;
+    p.pulls[arm]++; p.wins[arm] += win; p.coins += win; p.history.push([arm, win]);
+    return win;
+  }
+  // expected regret: sum over pulls of (best rate - rate pulled); does not depend on luck
+  function regret(p, rates) { const best = Math.max(...rates); return p.pulls.reduce((s, n, i) => s + n * (best - rates[i]), 0); }
+  return { mulberry32, gamma, beta, lgamma, betaPdf, makeRates, argmaxRandom, newPlayer, thompsonChoose, epsGreedyChoose, pull, regret, DIFFICULTY };
+})();
+if (typeof module !== "undefined") module.exports = Core;
+</script>
+
+<script>
+/* ---------- UI ---------- */
+const PULLS = 100, COLORS = ["var(--m0)", "var(--m1)", "var(--m2)"], HEX = ["#8a5cf6", "#e0603a", "#1f9fb5"];
+const NAMES = ["Violet", "Ember", "Lagoon"], SYMS = ["◆", "●", "▲"];
+const qs = new URLSearchParams(location.search);
+let level = "easy", game, muted = false, audio = null;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+level = ["easy", "medium", "hard"].includes(qs.get("level")) ? qs.get("level") : (store.get("btb-level") || "easy");
+muted = store.get("btb-muted") === "1";
+
+function tone(freq, dur, type = "sine", when = 0, vol = 0.12) {
+  if (muted) return;
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    const t = audio.currentTime + when, o = audio.createOscillator(), g = audio.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(audio.destination); o.start(t); o.stop(t + dur);
+  } catch (e) {}
+}
+const sfx = {
+  pull() { tone(220, 0.08, "square", 0, 0.05); },
+  win() { tone(660, 0.12, "triangle"); tone(990, 0.18, "triangle", 0.08); },
+  lose() { tone(140, 0.15, "sawtooth", 0, 0.05); },
+  end(won) { (won ? [523, 659, 784, 1047] : [392, 330, 262]).forEach((f, i) => tone(f, 0.25, "triangle", i * 0.13)); },
+};
+
+function newGame() {
+  const seed = qs.has("seed") && !game ? Number(qs.get("seed")) : (Math.random() * 2 ** 32) >>> 0;
+  const rng = Core.mulberry32(seed);
+  game = {
+    seed, rng, rates: Core.makeRates(rng, level), left: PULLS, over: false,
+    players: [Core.newPlayer(), Core.newPlayer(), Core.newPlayer()],
+  };
+  renderMachines(); render();
+}
+
+function renderMachines() {
+  const box = document.getElementById("machines");
+  box.innerHTML = "";
+  for (let i = 0; i < 3; i++) {
+    const m = document.createElement("div");
+    m.className = "machine"; m.tabIndex = 0; m.setAttribute("role", "button");
+    m.setAttribute("aria-label", "Pull machine " + (i + 1) + ", " + NAMES[i]);
+    m.innerHTML = `<span class="key">${i + 1}</span><div class="name" style="color:${COLORS[i]}">${NAMES[i]}</div>
+      <div class="window" style="background:${COLORS[i]}"><span class="sym">${SYMS[i]}</span></div>
+      <div class="stats" id="ms${i}">0 pulls · 0 coins</div><div class="true" id="mt${i}"></div>`;
+    m.addEventListener("click", () => userPull(i));
+    m.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); userPull(i); } });
+    box.appendChild(m);
+  }
+}
+
+function userPull(arm) {
+  if (game.over) return;
+  const [you, ts, eg] = game.players, rng = game.rng;
+  const win = Core.pull(you, arm, game.rates, rng);
+  Core.pull(ts, Core.thompsonChoose(ts, rng), game.rates, rng);
+  Core.pull(eg, Core.epsGreedyChoose(eg, rng), game.rates, rng);
+  game.left--;
+  animate(arm, win);
+  render();
+  if (game.left === 0) finish();
+}
+
+function animate(arm, win) {
+  const m = document.getElementById("machines").children[arm];
+  m.classList.remove("spin", "win", "lose"); void m.offsetWidth;
+  m.classList.add("spin", win ? "win" : "lose");
+  sfx.pull();
+  setTimeout(() => (win ? sfx.win() : sfx.lose()), 120);
+  if (win) { const c = document.createElement("div"); c.className = "coin"; c.textContent = "🪙"; m.appendChild(c); setTimeout(() => c.remove(), 700); }
+  clearTimeout(m._t); m._t = setTimeout(() => m.classList.remove("win", "lose"), 600);
+}
+
+function render() {
+  const P = game.players, coins = P.map(p => p.coins), top = Math.max(...coins);
+  document.getElementById("prog").style.width = (100 * (PULLS - game.left) / PULLS) + "%";
+  document.getElementById("pullsLeft").textContent = game.left + " pulls left";
+  const best = store.get("btb-best-" + level);
+  document.getElementById("hs").textContent = `Best (${level}): ${best === null ? "–" : best + " coins"}`;
+  document.querySelectorAll("#diff button").forEach(b => b.setAttribute("aria-pressed", b.dataset.d === level));
+  document.getElementById("mute").textContent = muted ? "🔇" : "🔊";
+  const you = P[0];
+  for (let i = 0; i < 3; i++) {
+    document.getElementById("ms" + i).textContent = `${you.pulls[i]} pull${you.pulls[i] === 1 ? "" : "s"} · ${you.wins[i]} coin${you.wins[i] === 1 ? "" : "s"}`;
+    document.getElementById("mt" + i).textContent = game.over ? `true rate ${Math.round(game.rates[i] * 100)}%` : "";
+    document.getElementById("machines").children[i].toggleAttribute("disabled", game.over);
+  }
+  P.forEach((p, k) => {
+    document.getElementById("s" + k).textContent = p.coins;
+    const n = PULLS - game.left;
+    document.getElementById("r" + k).textContent = game.over
+      ? `coins · regret ${Core.regret(p, game.rates).toFixed(1)}`
+      : `coins · ${n ? (100 * p.coins / n).toFixed(0) : 0}% hit rate`;
+    document.getElementById("lead" + k).textContent = n && p.coins === top ? "★ leading" : "";
+    const bars = document.getElementById("b" + k), mx = Math.max(1, ...p.pulls);
+    bars.innerHTML = p.pulls.map((c, i) => `<div style="height:${(100 * c / mx).toFixed(0)}%;background:${COLORS[i]}" title="${NAMES[i]}: ${c} pulls"><span>${c}</span></div>`).join("");
+  });
+  if (!document.getElementById("betaBox").classList.contains("hidden")) drawBeta();
+}
+
+function drawBeta() {
+  const cv = document.getElementById("beta"), ctx = cv.getContext("2d"), ts = game.players[1];
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const css = getComputedStyle(document.documentElement), ink = css.getPropertyValue("--muted"), line = css.getPropertyValue("--line");
+  const L = 34, R = 10, T = 10, B = 26, pw = W - L - R, ph = H - T - B, N = 300;
+  const curves = [0, 1, 2].map(i => { const a = 1 + ts.wins[i], b = 1 + ts.pulls[i] - ts.wins[i]; const ys = []; for (let j = 1; j < N; j++) ys.push(Core.betaPdf(j / N, a, b)); return { a, b, ys }; });
+  const ymax = Math.max(1.5, ...curves.flatMap(c => c.ys)) * 1.08;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = line; ctx.lineWidth = 1; ctx.fillStyle = ink; ctx.font = "11px sans-serif";
+  for (let x = 0; x <= 1.0001; x += 0.2) { const px = L + x * pw; ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke(); const lab = Math.round(x * 100) + "%"; ctx.textAlign = x < 0.01 ? "left" : x > 0.99 ? "right" : "center"; ctx.fillText(lab, px, H - 8); ctx.textAlign = "left"; }
+  ctx.save(); ctx.translate(10, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("density", -20, 0); ctx.restore();
+  curves.forEach((c, i) => {
+    ctx.beginPath();
+    c.ys.forEach((y, j) => { const px = L + ((j + 1) / N) * pw, py = T + ph - (y / ymax) * ph; j ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+    ctx.strokeStyle = HEX[i]; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.lineTo(L + pw, T + ph); ctx.lineTo(L, T + ph); ctx.closePath(); ctx.globalAlpha = 0.08; ctx.fillStyle = HEX[i]; ctx.fill(); ctx.globalAlpha = 1;
+    if (game.over) { const px = L + game.rates[i] * pw; ctx.setLineDash([4, 4]); ctx.beginPath(); ctx.moveTo(px, T); ctx.lineTo(px, T + ph); ctx.stroke(); ctx.setLineDash([]); }
+  });
+  document.getElementById("betaLegend").innerHTML = curves.map((c, i) =>
+    `<span><i style="background:${HEX[i]}"></i>${NAMES[i]}: Beta(${c.a}, ${c.b}), mean ${(100 * c.a / (c.a + c.b)).toFixed(0)}%</span>`).join("") +
+    (game.over ? `<span>dashed = true rate</span>` : "");
+}
+
+function finish() {
+  game.over = true; render();
+  const P = game.players, names = ["You", "Thompson sampling", "ε-greedy (0.1)"];
+  const best = Math.max(...game.rates), youCoins = P[0].coins;
+  const key = "btb-best-" + level, prev = store.get(key), isHigh = prev === null || youCoins > Number(prev);
+  if (isHigh) store.set(key, String(youCoins));
+  const regrets = P.map(p => Core.regret(p, game.rates));
+  const winner = P.map(p => p.coins).indexOf(Math.max(...P.map(p => p.coins)));
+  document.getElementById("endTitle").innerHTML = (winner === 0 ? "You beat the bandits! 🎉" : names[winner] + " wins") + (isHigh ? ' <span class="badge">NEW HIGH SCORE</span>' : "");
+  document.getElementById("endSub").textContent = `True rates: ${game.rates.map((r, i) => NAMES[i] + " " + Math.round(r * 100) + "%").join(", ")}. Perfect play expects ${(best * PULLS).toFixed(0)} coins.`;
+  document.getElementById("endTable").innerHTML = "<tr><th>Player</th><th>Coins</th><th>Pulls per machine</th><th>Regret</th></tr>" +
+    P.map((p, k) => `<tr><td>${names[k]}</td><td>${p.coins}</td><td>${p.pulls.join(" / ")}</td><td>${regrets[k].toFixed(1)}</td></tr>`).join("");
+  const lowest = regrets.indexOf(Math.min(...regrets));
+  document.getElementById("endNote").innerHTML = `Lowest regret: <b>${names[lowest]}</b>. Regret = Σ (${Math.round(best * 100)}% − rate pulled) over your 100 pulls, so it measures your <i>choices</i>, not your luck. Coins can beat regret by luck; over many games, low regret wins.`;
+  sfx.end(winner === 0);
+  const d = document.getElementById("end");
+  if (!qs.has("noend")) { if (d.showModal) d.showModal(); else d.setAttribute("open", ""); }
+}
+
+document.querySelectorAll("#diff button").forEach(b => b.addEventListener("click", () => { level = b.dataset.d; store.set("btb-level", level); newGame(); }));
+document.getElementById("newGame").addEventListener("click", newGame);
+document.getElementById("again").addEventListener("click", () => { document.getElementById("end").close(); newGame(); });
+document.getElementById("mute").addEventListener("click", () => { muted = !muted; store.set("btb-muted", muted ? "1" : "0"); render(); });
+document.getElementById("showBeta").addEventListener("change", e => { document.getElementById("betaBox").classList.toggle("hidden", !e.target.checked); render(); });
+document.addEventListener("keydown", e => { if (["1", "2", "3"].includes(e.key) && !document.getElementById("end").open) userPull(Number(e.key) - 1); });
+window.addEventListener("resize", () => { if (!document.getElementById("betaBox").classList.contains("hidden")) drawBeta(); });
+
+newGame();
+// ?autoplay=N plays N pulls with a simple strategy (for demos and screenshots); ?beta=1 opens the curves
+if (qs.get("beta") === "1") { document.getElementById("showBeta").checked = true; document.getElementById("betaBox").classList.remove("hidden"); render(); }
+if (qs.has("autoplay")) { muted = true; const n = Math.min(PULLS, Number(qs.get("autoplay")) || PULLS); for (let t = 0; t < n; t++) userPull(Core.epsGreedyChoose(game.players[0], game.rng, 0.15)); }
+</script>
+</body>
+</html>
